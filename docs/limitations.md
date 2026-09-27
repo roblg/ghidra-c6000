@@ -39,11 +39,13 @@ page has the detail. The module is a working decoder with staged semantics.
   expose their CPU-visible load/store plus named link events. `CMTL` returns
   its monitor-provided success value through a userop. Ghidra's instruction
   emulator cannot decide another core's link state by itself.
-* **Branch delay slots are not modelled** in p-code: a branch's p-code
-  jumps at the branch itself, so on the taken path the decompiler does not
-  see the (up to five cycles of) delay-slot instructions that execute before
-  the jump. Register data flow through multi-cycle results *is* modelled
-  (see above).
+* **Branch delay slots are inlined only where the model is exact** — see
+  [internals](internals.md#branch-delay-slots). A branch whose window holds
+  another branch or call, is the target of a jump, mixes 16- and 32-bit
+  instructions, or issues a load that lands after the branch keeps jumping
+  at the branch itself, so on its taken path the decompiler does not see
+  the delay-slot work; it gets a Warning bookmark in category
+  `C6000 packet semantics`.
 * **Constant propagation is bounded to 512-byte windows.** This prevents the
   observed stage 2 heap exhaustion and recovers the three checked stage 1
   register-built call targets, but a value carried only across a longer span

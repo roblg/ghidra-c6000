@@ -69,6 +69,7 @@ public class C6000RegisterBranchAnalyzer extends AbstractAnalyzer {
 			MessageLog log) throws CancelledException {
 		Listing listing = program.getListing();
 		Register mode = program.getRegister("c_branch_terminal");
+		Register slotted = program.getRegister("ep_br");
 		List<Address> candidates = new ArrayList<>();
 		// Calls discovered during later analysis can materialize branch thunks
 		// outside the current added set. Revisit every decoded branch here so
@@ -86,7 +87,11 @@ public class C6000RegisterBranchAnalyzer extends AbstractAnalyzer {
 					(override == FlowOverride.RETURN &&
 						"B3".equals(instruction.getDefaultOperandRepresentation(0)))) ||
 				BigInteger.ONE.equals(program.getProgramContext().getValue(mode,
-					instruction.getAddress(), false))) continue;
+					instruction.getAddress(), false)) ||
+				// Lifted with its delay slots: a CALL or RETURN override already
+				// fixes its flow, and redecoding it alone would drop the slots.
+				(slotted != null && BigInteger.ONE.equals(program.getProgramContext()
+						.getValue(slotted, instruction.getAddress(), false)))) continue;
 			candidates.add(instruction.getAddress());
 		}
 

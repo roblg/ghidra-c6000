@@ -13,13 +13,28 @@ SPRUFE8B's .L/.S/.D opcode maps (Figures F-3, F-18, F-21) and NOP:
   1018     MPY.M1  A1,A2,A8      ; 16x16 multiply, one delay slot
   101c     ADD.L1  A8,A0,A9      ; cycle +1: old A8
   1020     ADD.L1  A8,A0,A10     ; cycle +2: product
-  1024     B.S2    B3
-  1028     NOP     5
+  1024     MVK.S1  3,A1
+  1028     MVK.S1  -1,A3
+  102c     MVK.S1  1,A13
+  1030     MVK.S1  0,A12
+  1034 L:  [A1] B.S1 L           ; reads A1 at issue
+  1038  || ADD.L1  A1,A3,A1      ; delay slot: A1 -= 1
+  103c     ADD.L1  A12,A13,A12   ; delay slot: counts passes
+  1040     NOP     4             ; delay slots 2..5
+  1044     MVK.S1  0,A14
+  1048     B.S1    SKIP          ; unconditional
+  104c     MVK.S1  7,A14         ; delay slot: runs on the taken path
+  1050     NOP     4
+  1054     MVK.S1  99,A14        ; never runs
+  1060 SKIP: B.S2  B3
+  1064     NOP     5
   1800     .word   0x11223344
 
-C6000PacketSemanticsTest.java runs 0x1000..0x1024 in Ghidra's p-code
+C6000PacketSemanticsTest.java runs 0x1000..0x1060 in Ghidra's p-code
 emulator with A0=0 A1=5 A2=7 A4=0x1800 A5=0x55 A8=0x99 and expects
-A1=7 A2=5 A5=A7=0x11223344 A6=0x55 A8=A10=35 A9=0x99.
+A2=5 A5=A7=0x11223344 A6=0x55 A8=A10=35 A9=0x99 from the packets and delay
+slots, and A1=-1 A12=4 A14=7 from the branch delay slots (the loop runs
+four passes; lifted as an immediate jump it would never decrement A1).
 """
 
 from pathlib import Path
@@ -49,6 +64,15 @@ def nop(count):
     return (count - 1) << 13
 
 
+def mvk_s1(cst, dst, p=0):
+    return (dst << 23) | ((cst & 0xFFFF) << 7) | (0xA << 2) | p
+
+
+def b_s1(at, target, creg=0, z=0, p=0):
+    disp = (target - (at & ~31)) >> 2
+    return (creg << 29) | (z << 28) | ((disp & 0x1FFFFF) << 7) | (0x4 << 2) | p
+
+
 B_B3 = 0x362 | (3 << 18)
 
 WORDS = {
@@ -61,8 +85,21 @@ WORDS = {
     0x1018: mpy_m1(1, 2, 8),
     0x101C: add_l(8, 0, 9),
     0x1020: add_l(8, 0, 10),
-    0x1024: B_B3,
-    0x1028: nop(5),
+    0x1024: mvk_s1(3, 1),
+    0x1028: mvk_s1(-1, 3),
+    0x102C: mvk_s1(1, 13),
+    0x1030: mvk_s1(0, 12),
+    0x1034: b_s1(0x1034, 0x1034, creg=4, p=1),
+    0x1038: add_l(3, 1, 1),
+    0x103C: add_l(13, 12, 12),
+    0x1040: nop(4),
+    0x1044: mvk_s1(0, 14),
+    0x1048: b_s1(0x1048, 0x1060),
+    0x104C: mvk_s1(7, 14),
+    0x1050: nop(4),
+    0x1054: mvk_s1(99, 14),
+    0x1060: B_B3,
+    0x1064: nop(5),
     0x1800: 0x11223344,
 }
 

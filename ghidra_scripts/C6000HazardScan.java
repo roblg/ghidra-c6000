@@ -6,8 +6,11 @@
 //   DELAY:  an instruction reads (or overwrites) the destination of a
 //           multi-cycle instruction (load, multiply, FP) before that result
 //           lands (hardware still sees the old value).
+//   BRANCH: a branch whose five delay cycles hold work other than NOPs
+//           (hardware runs that work before the branch takes effect).
 // With the packet-semantics analyzer installed, *_FIXED rows are hazards whose
-// eps/epd context bit is set, so the lifted p-code already models them.
+// eps/epd context bit is set, and branches lifted with their delay slots
+// (ep_br), so the lifted p-code already models them.
 // Usage: -postScript C6000HazardScan.java [outfile.tsv]
 // Set DEBUG=1 to print every hazard to the log as well.
 //@category C6000
@@ -74,6 +77,11 @@ public class C6000HazardScan extends GhidraScript {
 	private Effects effects(Instruction insn) {
 		Effects e = new Effects();
 		Set<String> writtenSoFar = new HashSet<>();
+		if (slotted(insn)) {
+			// The branch's p-code carries its delay slots; they are scanned
+			// as instructions of their own.
+			return e;
+		}
 		for (PcodeOp op : insn.getPcode()) {
 			if (touchesShadow(op)) continue; // packet-semantics wrapper copies
 			for (Varnode in : op.getInputs()) {
@@ -124,8 +132,8 @@ public class C6000HazardScan extends GhidraScript {
 
 	/** Cycles a packet member occupies; mirrors C6000ParallelSemantics. */
 	private int nopCycles(Instruction insn) {
-		String m = insn.getMnemonicString().toUpperCase().replaceAll("^\\[[^]]*\\]", "")
-				.replaceAll("\\..*", "");
+		String m = insn.getMnemonicString().toUpperCase().replaceFirst("^_", "")
+				.replaceAll("^\\[[^]]*\\]", "").replaceAll("\\..*", "");
 		if (m.equals("CALLP")) return 6;
 		if (m.startsWith("LD")) {
 			// PROT=1 compact fetch packet: four NOP cycles after each load.
@@ -153,6 +161,41 @@ public class C6000HazardScan extends GhidraScript {
 
 	private record Pending(String reg, int landsAt, Instruction writer) {}
 
+	/** A branch whose five delay cycles are being watched for real work. */
+	private static final class Window {
+		final Instruction branch;
+		final int issue;
+		boolean work;
+
+		Window(Instruction branch, int issue) {
+			this.branch = branch;
+			this.issue = issue;
+		}
+	}
+
+	private boolean slotted(Instruction insn) {
+		Register br = currentProgram.getRegister("ep_br");
+		if (br == null) return false;
+		var v = insn.getRegisterValue(br);
+		return v != null && v.hasValue() && v.getUnsignedValue().testBit(0);
+	}
+
+	private static boolean isBranch(Instruction insn) {
+		String m = insn.getMnemonicString().toUpperCase().replaceAll("^\\[[^]]*\\]", "")
+				.replaceAll("\\..*", "");
+		return m.equals("B") || m.equals("BNOP") || m.equals("BDEC") || m.equals("BPOS");
+	}
+
+	private int branchWork, branchSlotted;
+
+	private void closeWindow(Window w, PrintWriter out, boolean debug) {
+		if (w == null || !w.work) return;
+		branchWork++;
+		boolean ok = slotted(w.branch);
+		if (ok) branchSlotted++;
+		report(out, debug, ok ? "BRANCH_FIXED" : "BRANCH", w.branch, w.branch, "-");
+	}
+
 	@Override
 	public void run() throws Exception {
 		String[] args = getScriptArgs();
@@ -167,6 +210,7 @@ public class C6000HazardScan extends GhidraScript {
 		for (Function f : currentProgram.getFunctionManager().getFunctions(true)) {
 			if (monitor.isCancelled()) break;
 			List<Pending> pending = new ArrayList<>();
+			List<Window> windows = new ArrayList<>();
 			int cycle = 0;
 			Instruction prevEnd = null;
 			InstructionIterator it = currentProgram.getListing().getInstructions(f.getBody(), true);
@@ -177,6 +221,8 @@ public class C6000HazardScan extends GhidraScript {
 				if (prevEnd != null && pkt.isEmpty() &&
 					insn.getMinAddress().subtract(prevEnd.getMaxAddress()) > 5) {
 					pending.clear();
+					for (Window w : windows) closeWindow(w, out, debug);
+					windows.clear();
 				}
 				pkt.add(insn);
 				boolean more;
@@ -192,6 +238,19 @@ public class C6000HazardScan extends GhidraScript {
 				if (pkt.size() > 1) multi++;
 				List<Effects> eff = new ArrayList<>();
 				for (Instruction p : pkt) eff.add(effects(p));
+				// Delay-slot work: later members of a branch's packet and the
+				// packets of the next five cycles.
+				for (Window w : windows) {
+					if (w.issue < cycle && cycle <= w.issue + 5) {
+						for (Instruction p : pkt) w.work |= !isNop(p);
+					}
+				}
+				for (int j = 0; j < pkt.size(); j++) {
+					if (!isBranch(pkt.get(j)) || nopCycles(pkt.get(j)) > 5) continue;
+					Window w = new Window(pkt.get(j), cycle);
+					for (int k = j + 1; k < pkt.size(); k++) w.work |= !isNop(pkt.get(k));
+					windows.add(w);
+				}
 
 				// Same-packet read after an earlier member's write.
 				for (int j = 0; j < pkt.size(); j++) {
@@ -242,9 +301,15 @@ public class C6000HazardScan extends GhidraScript {
 				cycle += packetCycles;
 				final int now = cycle;
 				pending.removeIf(p -> p.landsAt < now);
+				windows.removeIf(w -> {
+					if (w.issue + 5 >= now) return false;
+					closeWindow(w, out, debug);
+					return true;
+				});
 				prevEnd = pkt.get(pkt.size() - 1);
 				pkt.clear();
 			}
+			for (Window w : windows) closeWindow(w, out, debug);
 		}
 		if (out != null) out.close();
 		println(String.format(
@@ -253,6 +318,8 @@ public class C6000HazardScan extends GhidraScript {
 			currentProgram.getFunctionManager().getFunctionCount()));
 		println(String.format("C6000_HAZARDS handled: packet %d/%d delay %d/%d",
 			packetFixed, packetHaz, delayFixed, delayHaz + delayWaw));
+		println(String.format("C6000_HAZARDS branch delay slots with work: %d, inlined %d",
+			branchWork, branchSlotted));
 		println("C6000_HAZARDS delay_raw by writer: " + byWriter);
 		Map<String, Integer> reasons = new TreeMap<>();
 		var marks = currentProgram.getBookmarkManager().getBookmarksIterator("Warning");
@@ -263,6 +330,11 @@ public class C6000HazardScan extends GhidraScript {
 			}
 		}
 		println("C6000_HAZARDS unsupported (bookmarked): " + reasons);
+	}
+
+	private static boolean isNop(Instruction insn) {
+		String m = insn.getMnemonicString().toUpperCase().replaceFirst("^_", "");
+		return m.equals("NOP") || m.startsWith("NOP ") || m.equals("CPKT");
 	}
 
 	private void report(PrintWriter out, boolean debug, String kind, Instruction at,

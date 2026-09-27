@@ -40,7 +40,9 @@ def context_fields():
     lines = [BEGIN,
              "  ep_phase = (15,15) noflow  # 0: packet wrapper, 1: instruction proper",
              "  ep_cpre  = (16,16) noflow  # commit before the instruction (branch last)",
-             "  ep_any   = (17,17) noflow  # any packet-semantics bit set on this slot"]
+             "  ep_any   = (17,17) noflow  # any packet-semantics bit set on this slot",
+             "  ep_br    = (18,18) noflow  # branch lifted with its delay slots (gen_branch.py)",
+             "  ep_ds    = (19,25) noflow  # that branch's delay-slot window, in halfwords"]
     for prefix, base in BANKS:
         row = []
         for i, reg in enumerate(REGS):

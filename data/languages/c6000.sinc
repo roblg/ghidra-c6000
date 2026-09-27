@@ -108,6 +108,8 @@ define context contextreg
   ep_phase = (15,15) noflow  # 0: packet wrapper, 1: instruction proper
   ep_cpre  = (16,16) noflow  # commit before the instruction (branch last)
   ep_any   = (17,17) noflow  # any packet-semantics bit set on this slot
+  ep_br    = (18,18) noflow  # branch lifted with its delay slots (gen_branch.py)
+  ep_ds    = (19,25) noflow  # that branch's delay-slot window, in halfwords
   epsA0=(32,32) epsA1=(33,33) epsA2=(34,34) epsA3=(35,35) epsA4=(36,36) epsA5=(37,37) epsA6=(38,38) epsA7=(39,39) noflow
   epsA8=(40,40) epsA9=(41,41) epsA10=(42,42) epsA11=(43,43) epsA12=(44,44) epsA13=(45,45) epsA14=(46,46) epsA15=(47,47) noflow
   epsA16=(48,48) epsA17=(49,49) epsA18=(50,50) epsA19=(51,51) epsA20=(52,52) epsA21=(53,53) epsA22=(54,54) epsA23=(55,55) noflow
@@ -595,3 +597,4 @@ define pcodeop c6000_spmaskr;
 @include "c6000_compact.sinc"
 @include "c6000_manual.sinc"
 @include "c6000_packet.sinc"
+@include "c6000_branch.sinc"

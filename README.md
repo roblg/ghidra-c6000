@@ -52,6 +52,7 @@ context, which auto-analysis does before disassembly.
 | P-code | integer ALU, multiplies, saturating and packed arithmetic, bit fields, linear and AMR circular addressing, loads/stores, single- and selected double-precision FP, compares, shifts, branches, `MVC`; no unimplemented-instruction placeholders remain |
 | Software loops (`SPLOOP` family) | decoded and annotated with bookmarks; a separate cycle scheduler replays loop buffers (`C6000LoopReplay.java`) |
 | Packet and delay-slot data flow | `C6000ParallelSemanticsAnalyzer` makes packet members read pre-packet registers and load/multiply/FP results land after their delay slots, in straight-line code; unsupported cases are bookmarked |
+| Branch delay slots | the same analyzer lifts a branch with its five delay cycles as SLEIGH delay slots when they hold work, so calls see their arguments and returns their results; unsupported windows are bookmarked |
 | Calling convention | TI C6000 C ABI (A4/B4/A6/B6… arguments, A4 return, B3 return address, B15 stack) |
 | Function ID | `tools/gen_fid.py` generator only; no database shipped (TI licence) |
 
@@ -59,8 +60,9 @@ Main limitations:
 
 - Packet and delay-slot data hazards are corrected only in straight-line
   code; a delay window crossing a branch (software-pipelined loops) keeps
-  sequential semantics and gets a warning bookmark. Branch delay slots
-  themselves are not modelled: a branch takes effect immediately in p-code.
+  sequential semantics and gets a warning bookmark. Branch delay slots are
+  inlined only when the window has no branch, no jump into it and one
+  instruction width; other branches still take effect immediately.
 - Constant propagation is bounded to 512-byte windows to avoid heap
   exhaustion on large images.
 - Floating-point status flags are incomplete for some instructions, and

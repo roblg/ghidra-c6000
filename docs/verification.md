@@ -338,7 +338,12 @@ in both endian modes, imports it with auto-analysis and runs
 `C6000PacketSemanticsTest.java`, which executes the p-code in Ghidra's
 emulator. It checks a register swap packet (`ADD A1,A0,A2 || ADD A2,A0,A1`),
 a load with a read in its first delay slot and another after it lands, and a
-16-bit multiply with one delay slot. `C6000HazardScan.java [out.tsv]` lists
+16-bit multiply with one delay slot. It also runs a counted loop whose
+decrement is issued in parallel with its predicated branch and whose
+accumulator sits in the branch's delay slots (four passes, `A1=-1`), and an
+unconditional jump whose delay slot sets a register the skipped code would
+overwrite. Lifted without delay slots the loop never ends.
+`C6000HazardScan.java [out.tsv]` lists
 every packet and delay-slot hazard in a program, marks the ones the analyzer
 handled (`*_FIXED`), and summarises the bookmarked reasons for the rest.
 

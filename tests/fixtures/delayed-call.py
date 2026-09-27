@@ -24,8 +24,10 @@ Only the far arm is a call:
   1064  MVKH.S2 0x0,B3           1070  NOP     4
   1068  [!A1]B.S1 0x1080 (jump)  1074  B.S2 B3 ; ...  1080  B.S2 B3
 
-C6000DelayedCallTest.java checks every B form becomes a call that falls
-through into its delay slots and that 0x1100 becomes a function.
+C6000DelayedCallTest.java checks every B form becomes a call and that
+0x1100 becomes a function. Calls whose delay slots do work (0x1008, 0x1018)
+carry them as delay slots and fall through to the return address; the
+others fall through into their slots.
 """
 
 from pathlib import Path

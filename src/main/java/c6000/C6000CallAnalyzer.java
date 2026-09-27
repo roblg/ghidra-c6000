@@ -308,7 +308,7 @@ public class C6000CallAnalyzer extends AbstractAnalyzer {
 				Instruction insn;
 				try {
 					insn = decode(at.getNewAddress(start));
-					if (insn != null && insn.getMnemonicString().equals("CPKT")) insn = next(insn);
+					if (insn != null && baseName(insn).equals("CPKT")) insn = next(insn);
 					while (insn != null && insn.getMinAddress().compareTo(at) < 0) {
 						before.add(insn);
 						insn = next(insn);
@@ -343,7 +343,7 @@ public class C6000CallAnalyzer extends AbstractAnalyzer {
 				src = insn.getRegister(1);
 			}
 			else return null;
-			if (src == null || insn.getRegister(n - 1) == null || insn.getMnemonicString().startsWith("[")) {
+			if (src == null || insn.getRegister(n - 1) == null || predicate(insn) != null) {
 				return null;
 			}
 			long[] value = regs.get(src);
@@ -405,7 +405,7 @@ public class C6000CallAnalyzer extends AbstractAnalyzer {
 
 		private Instruction next(Instruction current) {
 			Instruction next = decode(current.getMaxAddress().next());
-			while (next != null && next.getMnemonicString().equals("CPKT")) {
+			while (next != null && baseName(next).equals("CPKT")) {
 				next = decode(next.getMaxAddress().next());
 			}
 			return next;
@@ -476,6 +476,7 @@ public class C6000CallAnalyzer extends AbstractAnalyzer {
 
 	private static String predicate(Instruction insn) {
 		String name = insn.getMnemonicString();
+		if (name.startsWith("_")) name = name.substring(1);
 		int end = name.indexOf(']');
 		return name.startsWith("[") && end > 0 ? name.substring(1, end) : null;
 	}

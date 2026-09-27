@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // @category C6000
 // Execute tests/fixtures/packet-semantics.py in the p-code emulator and check
-// that execute packets read pre-packet registers and that load and multiply
-// results land after their delay slots.
+// that execute packets read pre-packet registers, that load and multiply
+// results land after their delay slots, and that branch delay slots run
+// before the branch takes effect.
 
 import java.util.Map;
 
@@ -16,7 +17,7 @@ public class C6000PacketSemanticsTest extends GhidraScript {
 	@Override
 	protected void run() throws Exception {
 		Address start = toAddr(0x1000);
-		Address stop = toAddr(0x1024);
+		Address stop = toAddr(0x1060);
 		if (getFunctionAt(start) == null) {
 			throw new AssertionError("no function at 0x1000; import with auto-analysis");
 		}
@@ -44,7 +45,7 @@ public class C6000PacketSemanticsTest extends GhidraScript {
 					java.math.BigInteger.ZERO);
 				emu.setContextRegister(stored == null ? zero : zero.combineValues(stored));
 				Address pc = emu.getExecutionAddress();
-				if (!emu.step(monitor) || ++steps > 64) {
+				if (!emu.step(monitor) || ++steps > 200) {
 					throw new AssertionError("emulation stopped at " +
 						emu.getExecutionAddress() + ": " + emu.getLastError());
 				}
@@ -54,8 +55,10 @@ public class C6000PacketSemanticsTest extends GhidraScript {
 						emu.readRegister("A5_dl")));
 				}
 			}
-			Map<String, Long> want = Map.of("A1", 7L, "A2", 5L, "A5", 0x11223344L,
-				"A6", 0x55L, "A7", 0x11223344L, "A8", 35L, "A9", 0x99L, "A10", 35L);
+			Map<String, Long> want = Map.ofEntries(Map.entry("A1", 0xffffffffL),
+				Map.entry("A2", 5L), Map.entry("A5", 0x11223344L), Map.entry("A6", 0x55L),
+				Map.entry("A7", 0x11223344L), Map.entry("A8", 35L), Map.entry("A9", 0x99L),
+				Map.entry("A10", 35L), Map.entry("A12", 4L), Map.entry("A14", 7L));
 			StringBuilder bad = new StringBuilder();
 			for (Map.Entry<String, Long> e : want.entrySet()) {
 				long got = emu.readRegister(e.getKey()).longValue() & 0xffffffffL;
