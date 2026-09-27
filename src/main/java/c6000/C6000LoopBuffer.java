@@ -701,13 +701,17 @@ public final class C6000LoopBuffer {
 		else if (name.contains("BNOP")) operand = 1;
 		else if (name.contains("ADDKPC")) operand = 2;
 		else return 1;
+		// NOP n idles n cycles in total (its operand is the cycle count for
+		// both the 32-bit and the compact form); BNOP and ADDKPC add their
+		// count after their own cycle (SPRUFE8B: B; NOP N == BNOP N).
+		int self = name.equals("NOP") ? 0 : 1;
 		Scalar count = insn.getScalar(operand);
-		if (count != null) return (int) count.getUnsignedValue() + 1;
+		if (count != null) return (int) count.getUnsignedValue() + self;
 		// The compact BNOP encoding with a fixed count of five has no Scalar
 		// object; Ghidra renders its literal operand as decimal text.
 		String rendered = insn.getDefaultOperandRepresentation(operand);
 		if (rendered != null && rendered.matches("[0-7]")) {
-			return Integer.parseInt(rendered) + 1;
+			return Integer.parseInt(rendered) + self;
 		}
 		throw new IllegalArgumentException("missing idle count at " +
 			insn.getMinAddress());

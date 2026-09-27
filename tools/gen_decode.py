@@ -546,6 +546,7 @@ def main():
                     if sidefield is not None:
                         pat.append("%s=%s" % (sidefield, sideval))
                     pat.append("c_is16=0")
+                    pat.append("ep_phase=1")
                     if not fixed_pred:
                         pat.append("Cond")
                         # The predication table reserves creg=7. If the

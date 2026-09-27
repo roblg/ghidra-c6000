@@ -56,13 +56,11 @@ encoding `creg=7, z=0` (Table 3-9), so no valid 32-bit instruction matches it.
   p-bit comes from bits 13–0 of its fetch-packet header. In either case,
   `p=1` chains the next instruction into the same execute packet, including
   across a fetch-packet boundary.
-* Instructions in an execute packet read pre-packet state and commit together.
-  Ghidra has no notion of an execute packet, so each instruction is lifted on
-  its own with its own reads and writes. This is the usual pragmatic model; it
-  is *correct* for the common case of one writer per register per packet and can
-  mis-order a packet that reads and writes the same register. It is documented
-  rather than hidden.
-* Delay slots are not modelled as p-code. Branches (`B`, `BNOP`, `CALLP`, ...)
+* Instructions in an execute packet read pre-packet state and commit together,
+  and multi-cycle instructions write their destination after their delay
+  slots. Ghidra lifts one instruction at a time, so both are handled by the
+  packet-accurate p-code described [below](#packet-accurate-p-code).
+* Branch delay slots are not modelled as p-code. Branches (`B`, `BNOP`, `CALLP`, ...)
   have five and loads four; Ghidra's flow analysis follows the branch and the
   fall-through, which is what matters for recovery. `CALLP` writes `inst_start
   + 24` to `B3`, matching the five delay slots.
@@ -180,6 +178,58 @@ the SP comparisons. It represents status-register effects with the opaque
 not suitable for emulation. The same stage 2 function at `0xc0008c44`
 decompiled to 36 lines with the analysis language versus 219 with the exact
 language; the `fVar1 < 1.0` branch was visible in the shorter output.
+
+## Packet-accurate p-code
+
+Compiled C6000 code relies on packet and pipeline timing. In
+`SHR B16,31,B5 || MPY B5,B24,B24` the multiply reads the *old* B5, and after
+`LDW *A3,A3` the next four cycles still see the old A3. Lifting instructions
+one at a time in address order gets both wrong. On a C674x audio DSP image,
+`C6000HazardScan.java` found 962 same-packet read-after-write conflicts and
+several thousand delay-slot reads in 12,085 execute packets.
+
+The model follows the approach of Ghidra's Hexagon module (shadow
+registers committed at the end of a packet), adapted to C6000's
+variable-length packets and delay slots:
+
+* `tools/gen_packet.py` generates `c6000_packet.sinc`. Every root
+  constructor now requires `ep_phase=1`. A wrapper at `ep_phase=0` builds
+  the instruction between `EpSv` (`R_sv = R`), `EpPo` and `EpCo`
+  subtables, each switched per register by a noflow context bit:
+  * `eps<R>`: park this member's write in `R_pk` and restore R, because a
+    later member of the same packet reads R;
+  * `epd<R>`: park this multi-cycle result in `R_dl` and restore R, because
+    something reads or writes R before the result lands;
+  * `epc<R>` / `epe<R>`: on the last member of the packet (for `epe`, the
+    packet in which the result lands) commit `R = R_pk` / `R = R_dl`;
+  * `ep_cpre`: commit *before* the last member when it is a branch, so the
+    template has no p-code after the branch.
+  * `ep_any` selects the plain wrapper, `{ build instruction; }`, for every
+    slot without hazard bits. Ghidra derives flow types from the constructor
+    templates, so any `build` after a branch would make every branch
+    conditional.
+* `C6000ParallelSemanticsAnalyzer` (after the late branch pass) groups each
+  function's instructions into execute packets by p-bit, assigns cycles, and
+  sets the bits only where a hazard exists. A `NOP n` packet takes n cycles.
+  `BNOP n` and `ADDKPC` take n after their own cycle (`B; NOP N` equals
+  `BNOP N`). `CALLP` adds five cycles, and a load in a PROT=1 compact fetch
+  packet adds four (SPRUFE8B 3.10.2). Delay slots come from
+  `C6000ParallelSemantics.delaySlots`: loads 4, 16-bit multiplies 1, 32-bit
+  and single-precision FP operations 3, and double-precision operations up
+  to 9.
+* The analyzer only acts where the whole delay window is straight-line code
+  in one function body. It bookmarks, and leaves sequential, any case with a
+  branch or an entry point inside the window, two in-flight delayed writes of
+  one register, a register written by two members of one packet, a packet
+  hazard next to a branch that is not the packet's last member, or an
+  `SPLOOP` body. On the C674x image this covers 77% of packet hazards. Most
+  of the remainder are software-pipelined loops whose loads land in the next
+  iteration, which also needs branch delay slots to be modelled.
+
+Ghidra's p-code emulator flows its own decode context and does not read
+per-address noflow values. An emulator user must load the program context
+before each step, as `C6000PacketSemanticsTest.java` does. The decompiler
+uses the listing's instructions and needs nothing extra.
 
 ## Calling convention
 

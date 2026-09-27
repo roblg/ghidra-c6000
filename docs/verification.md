@@ -330,3 +330,15 @@ unexplained disagreements for each sweep. GNU also decoded eight `MVC .S1`
 forms whose `s=0` violates SPRUFE8B Figure F-31's `s=1` constraint; it left
 64 `SPKERNEL` rows undefined in each synthetic image. The first compact sweep
 exposed the `CPKT` slot collision that `C6000CompactHeaderTest.java` now covers.
+
+## Packet and delay-slot semantics
+
+`tools/test_packet_semantics.sh` builds `tests/fixtures/packet-semantics.py`
+in both endian modes, imports it with auto-analysis and runs
+`C6000PacketSemanticsTest.java`, which executes the p-code in Ghidra's
+emulator. It checks a register swap packet (`ADD A1,A0,A2 || ADD A2,A0,A1`),
+a load with a read in its first delay slot and another after it lands, and a
+16-bit multiply with one delay slot. `C6000HazardScan.java [out.tsv]` lists
+every packet and delay-slot hazard in a program, marks the ones the analyzer
+handled (`*_FIXED`), and summarises the bookmarked reasons for the rest.
+

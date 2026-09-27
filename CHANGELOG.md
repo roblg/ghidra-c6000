@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+* Packet-accurate p-code: `C6000ParallelSemanticsAnalyzer` and the generated
+  `c6000_packet.sinc` wrapper make execute-packet members read pre-packet
+  registers and make load, multiply and FP results land after their delay
+  slots. It acts only where a hazard exists and bookmarks what it cannot
+  model (see docs/internals.md). `C6000HazardScan.java` measures hazards and
+  coverage; `tools/test_packet_semantics.sh` runs the emulator test.
 * `C6000JumpTableAnalyzer` recovers the TI compiler's switch dispatch
   (guarded `LDW` from an `MVK`/`MVKH` table, then `B`/`BNOP` through the
   entry), which Ghidra's decompiler could not bound. On the CDJ-2000NXS DSP
@@ -10,6 +16,10 @@
   any function drops from 16,005 to 10,311 instructions.
 
 ### Fixed
+* A compact `NOP` displayed its raw N3 field, one less than its cycle count
+  (Figure H-9 places N3 where the 32-bit NOP keeps count-1). It now shows
+  the count, like the 32-bit form. `C6000LoopBuffer` no longer adds one to a
+  `NOP n` count, which also made 32-bit `NOP n` one cycle too long.
 * A 32-bit `BNOP` in a header-based (compact) fetch packet scaled its
   displacement by four instead of two, sending its CFG edge into the middle
   of an instruction.
