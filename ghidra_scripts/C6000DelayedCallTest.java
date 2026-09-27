@@ -2,6 +2,8 @@
 // @category C6000
 // Check B-with-B3 calls in an auto-analysed tests/fixtures/delayed-call.py image.
 
+import java.util.Map;
+
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.symbol.Reference;
@@ -23,11 +25,15 @@ public class C6000DelayedCallTest extends GhidraScript {
 				(jump == null ? "" : " flow=" + jump.getFlowType()) +
 				" function at 0x1080=" + getFunctionAt(toAddr(0x1080L)));
 		}
+		// A call whose delay slots do real work carries them in its p-code and
+		// falls through to the return address; the others fall into their slots.
+		Map<Long, Long> returns = Map.of(0x1008L, 0x1018L, 0x1018L, 0x1020L);
 		for (long site : new long[] { 0x1008L, 0x1018L, 0x1048L, 0x104cL, 0x106cL }) {
 			Instruction call = getInstructionAt(toAddr(site));
+			long fall = returns.getOrDefault(site, site + 4);
 			if (call == null || !call.getFlowType().isCall() ||
 				(site >= 0x1048L) != call.getFlowType().isConditional() ||
-				!toAddr(site + 4).equals(call.getFallThrough())) {
+				!toAddr(fall).equals(call.getFallThrough())) {
 				throw new AssertionError("call at " + toAddr(site) + ": " + call +
 					(call == null ? "" : " flow=" + call.getFlowType() +
 						" fallthrough=" + call.getFallThrough()));

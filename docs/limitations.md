@@ -28,13 +28,24 @@ page has the detail. The module is a working decoder with staged semantics.
   payload and stage 1 code region have no undecoded nonfill slots, but those
   images are not an exhaustive encoding test. The decoder leaves unknown words
   undefined instead of guessing an instruction.
-* **Execute packets are not modelled as units** — see
-  [internals](internals.md#execute-packets-delay-slots-and-parallel-semantics).
+* **Execute packets and delay slots are modelled for data flow only in
+  straight-line code** — see
+  [internals](internals.md#packet-accurate-p-code). Hazards the model cannot
+  express get a Warning bookmark in category `C6000 packet semantics`:
+  a branch or entry point inside a delay window, two in-flight delayed
+  writes of one register, a packet hazard next to a branch that is not the
+  packet's last member, and software-pipelined (`SPLOOP`) bodies.
 * **C64x+ linked-word operations need a memory monitor.** `LL` and `SL`
   expose their CPU-visible load/store plus named link events. `CMTL` returns
   its monitor-provided success value through a userop. Ghidra's instruction
   emulator cannot decide another core's link state by itself.
-* **No delay-slot modelling** in p-code.
+* **Branch delay slots are inlined only where the model is exact** — see
+  [internals](internals.md#branch-delay-slots). A branch whose window holds
+  another branch or call, is the target of a jump, mixes 16- and 32-bit
+  instructions, or issues a load that lands after the branch keeps jumping
+  at the branch itself, so on its taken path the decompiler does not see
+  the delay-slot work; it gets a Warning bookmark in category
+  `C6000 packet semantics`.
 * **Constant propagation is bounded to 512-byte windows.** This prevents the
   observed stage 2 heap exhaustion and recovers the three checked stage 1
   register-built call targets, but a value carried only across a longer span
@@ -139,7 +150,7 @@ page has the detail. The module is a working decoder with staged semantics.
   the loop-control userops, because the hardware buffer does not correspond
   to an ordinary control-flow edge.
 * **Predication** is decoded, displayed and guards the modelled 32-bit p-code.
-  Compact predication and packet-wide parallel effects need further work.
+  Compact predication needs further work.
 * The generic corpus is assembled from GNU binutils, whose tic6x assembler
   covers less of the ISA than the manual; it is a regression oracle, not a
   completeness proof.

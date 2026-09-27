@@ -56,16 +56,16 @@ encoding `creg=7, z=0` (Table 3-9), so no valid 32-bit instruction matches it.
   p-bit comes from bits 13–0 of its fetch-packet header. In either case,
   `p=1` chains the next instruction into the same execute packet, including
   across a fetch-packet boundary.
-* Instructions in an execute packet read pre-packet state and commit together.
-  Ghidra has no notion of an execute packet, so each instruction is lifted on
-  its own with its own reads and writes. This is the usual pragmatic model; it
-  is *correct* for the common case of one writer per register per packet and can
-  mis-order a packet that reads and writes the same register. It is documented
-  rather than hidden.
-* Delay slots are not modelled as p-code. Branches (`B`, `BNOP`, `CALLP`, ...)
-  have five and loads four; Ghidra's flow analysis follows the branch and the
-  fall-through, which is what matters for recovery. `CALLP` writes `inst_start
-  + 24` to `B3`, matching the five delay slots.
+* Instructions in an execute packet read pre-packet state and commit together,
+  and multi-cycle instructions write their destination after their delay
+  slots. Ghidra lifts one instruction at a time, so both are handled by the
+  packet-accurate p-code described [below](#packet-accurate-p-code).
+* Branches (`B`, `BNOP`, `BDEC`, `BPOS`, `CALLP`, ...) take effect after
+  five delay cycles and loads land after four. Where a branch's delay cycles
+  hold real work, the branch's p-code carries them as SLEIGH delay slots
+  (see [below](#branch-delay-slots)); otherwise it jumps at the branch,
+  which is exact when the window is only `NOP`s. `CALLP` writes `inst_start
+  + 24` to `B3`, matching the five delay slots, which are its own NOPs.
 * Branch targets are **PCE1-relative** — relative to the first instruction of
   the containing fetch packet, not to the branch itself. `B`/`CALLP`/`BNOP`/
   `BDEC`/`BPOS`/`ADDKPC` all use `inst_start & 0xFFFFFFE0`, exactly as the
@@ -180,6 +180,107 @@ the SP comparisons. It represents status-register effects with the opaque
 not suitable for emulation. The same stage 2 function at `0xc0008c44`
 decompiled to 36 lines with the analysis language versus 219 with the exact
 language; the `fVar1 < 1.0` branch was visible in the shorter output.
+
+## Packet-accurate p-code
+
+Compiled C6000 code relies on packet and pipeline timing. In
+`SHR B16,31,B5 || MPY B5,B24,B24` the multiply reads the *old* B5, and after
+`LDW *A3,A3` the next four cycles still see the old A3. Lifting instructions
+one at a time in address order gets both wrong. On a C674x audio DSP image,
+`C6000HazardScan.java` found 962 same-packet read-after-write conflicts and
+several thousand delay-slot reads in 12,085 execute packets.
+
+The model follows the approach of Ghidra's Hexagon module (shadow
+registers committed at the end of a packet), adapted to C6000's
+variable-length packets and delay slots:
+
+* `tools/gen_packet.py` generates `c6000_packet.sinc`. Every root
+  constructor now requires `ep_phase=1`. A wrapper at `ep_phase=0` builds
+  the instruction between `EpSv` (`R_sv = R`), `EpPo` and `EpCo`
+  subtables, each switched per register by a noflow context bit:
+  * `eps<R>`: park this member's write in `R_pk` and restore R, because a
+    later member of the same packet reads R;
+  * `epd<R>`: park this multi-cycle result in `R_dl` and restore R, because
+    something reads or writes R before the result lands;
+  * `epc<R>` / `epe<R>`: on the last member of the packet (for `epe`, the
+    packet in which the result lands) commit `R = R_pk` / `R = R_dl`;
+  * `ep_cpre`: commit *before* the last member when it is a branch, so the
+    template has no p-code after the branch.
+  * `ep_any` selects the plain wrapper, `{ build instruction; }`, for every
+    slot without hazard bits. Ghidra derives flow types from the constructor
+    templates, so any `build` after a branch would make every branch
+    conditional.
+* `C6000ParallelSemanticsAnalyzer` (after the late branch pass) groups each
+  function's instructions into execute packets by p-bit, assigns cycles, and
+  sets the bits only where a hazard exists. A `NOP n` packet takes n cycles.
+  `BNOP n` and `ADDKPC` take n after their own cycle (`B; NOP N` equals
+  `BNOP N`). `CALLP` adds five cycles, and a load in a PROT=1 compact fetch
+  packet adds four (SPRUFE8B 3.10.2). Delay slots come from
+  `C6000ParallelSemantics.delaySlots`: loads 4, 16-bit multiplies 1, 32-bit
+  and single-precision FP operations 3, and double-precision operations up
+  to 9.
+* The analyzer only acts where the whole delay window is straight-line code
+  in one function body. It bookmarks, and leaves sequential, any case with a
+  branch or an entry point inside the window, two in-flight delayed writes of
+  one register, a register written by two members of one packet, a packet
+  hazard next to a branch that is not the packet's last member, or an
+  `SPLOOP` body. A branch whose delay slots are inlined (below) is no
+  obstacle: its window is straight-line code inside its own p-code. On the
+  C674x image this covers 80% of packet hazards. Most of the remainder are
+  software-pipelined loops whose loads land in the next iteration, across
+  the loop's branch.
+
+Ghidra's p-code emulator flows its own decode context and does not read
+per-address noflow values. An emulator user must load the program context
+before each step, as `C6000PacketSemanticsTest.java` does. The decompiler
+uses the listing's instructions and needs nothing extra.
+
+### Branch delay slots
+
+A C6000 branch takes effect after five delay cycles, and the execute packets
+issued in those cycles run on the taken and the fall-through path alike. The
+TI compiler fills them: argument set-up and the return address for a call,
+the epilogue's register restores for a return, a loop's counter decrement. A
+branch lifted as an immediate jump hides all of that on the taken path, so
+`return;` appears where the function returned a value computed in its
+return's delay slots, and a call's arguments appear to be set after it.
+
+* `tools/gen_branch.py` generates `c6000_branch.sinc`: for every branching
+  root constructor (`B`, `BNOP`, `BDEC`, `BPOS`, `B IRP`/`NRP` and the
+  compact forms) a variant selected by the noflow context bit `ep_br`. It
+  captures the condition (`BR_c`) and a register target (`BR_t`) at issue,
+  as the hardware does, then inlines the window with SLEIGH's `delayslot`
+  directive (subtable `BrDs`, window length in `ep_ds` halfwords), then
+  branches on the captured values. `CALLP` is not varied: its delay cycles
+  are its own NOPs. An unpredicated register branch not yet classified
+  (`c_branch_terminal=0`) becomes `call [BR_t]`, which keeps its
+  fall-through and takes the delayed-call or return analyzer's flow
+  override. SLEIGH warns once per `BrDs` constructor that a delay slot is
+  used in a subtable; Ghidra's prototype walk handles it.
+* Ghidra then treats the window as delay slots: the branch's fall-through
+  is the first address after the window (for a call, the return address),
+  the listing marks slot instructions with `_`, and the decompiler sees the
+  window's p-code, packet and pipeline semantics included, on both paths.
+* `C6000ParallelSemanticsAnalyzer` picks the window: the rest of the
+  branch's packet and the packets up to five cycles after it. It sets
+  `ep_br` only when the window holds something other than `NOP`, or a
+  multi-cycle result is in flight, and decodes the slots of unconditional
+  jumps, which Ghidra never follows, first. It rebuilds the branch and its
+  window together from the stored context, because Ghidra's flow
+  disassembler does not carry every per-address noflow bit into delay
+  slots, and adds the slots to the function body.
+* It bookmarks and leaves immediate: a branch or call inside the window
+  (the TI if/else and call-or-jump pairs), a jump into the window, a
+  window mixing 16- and 32-bit instructions (Ghidra re-parses delay slots
+  with the branch's context, so their widths must agree under it), a
+  `BDEC` whose counter another member of its packet uses, a delayed write
+  issued in the window that lands after the branch, and `SPLOOP` bodies.
+
+On the C674x image, 430 of the 919 branches whose delay cycles hold work
+are inlined, and packet- and delay-hazard coverage rises slightly because a
+branch in a delay window is no longer always an obstacle. The largest
+remaining groups are branches in each other's windows (275), delayed writes
+landing after their branch (198) and mixed-width compact windows (133).
 
 ## Calling convention
 
