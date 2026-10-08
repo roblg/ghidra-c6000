@@ -8,6 +8,8 @@
   entry), which Ghidra's decompiler could not bound. On the CDJ-2000NXS DSP
   all 9 such tables are recovered with their exact case counts; code outside
   any function drops from 16,005 to 10,311 instructions.
+* CI builds and smoke-tests the extension against Ghidra 12.1.4 as well as
+  12.1.3, and uploads one zip per version.
 
 ### Fixed
 * A 32-bit `BNOP` in a header-based (compact) fetch packet scaled its

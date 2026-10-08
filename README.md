@@ -93,9 +93,9 @@ four compiled language variants and the loader opinion.
 ## Testing
 
 CI ([`build.yml`](.github/workflows/build.yml)) runs `tools/build.sh`, installs
-the zip into a fresh Ghidra 12.1.3 and decodes a 48-byte synthetic image with
-`C6000CorpusTest.java`, requiring no undecoded slots and no zero-width p-code
-operands.
+the zip into a fresh Ghidra (12.1.3 and 12.1.4) and decodes a 48-byte synthetic
+image with `C6000CorpusTest.java`, requiring no undecoded slots and no
+zero-width p-code operands.
 
 Beyond that, [docs/verification.md](docs/verification.md) describes:
 
