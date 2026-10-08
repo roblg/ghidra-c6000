@@ -16,10 +16,12 @@ jobs:
         ghidra: [ "12.1.3", "12.1.4" ]
     env:
       GHIDRA_VERSION: ${{ matrix.ghidra }}
-      GHIDRA_INSTALL_DIR: ${{ github.workspace }}/ghidra
-      GHIDRA_WORK: ${{ github.workspace }}/ghidra-work
+      # Everything CI unpacks goes under scratch/, which build.gradle keeps out
+      # of the zip: buildExtension packs the rest of the workspace.
+      GHIDRA_INSTALL_DIR: ${{ github.workspace }}/scratch/ghidra
+      GHIDRA_WORK: ${{ github.workspace }}/scratch/ghidra-work
       # Ghidra 12 requires JDK 21 and rejects newer JDKs.
-      JAVA_HOME: ${{ github.workspace }}/jdk21
+      JAVA_HOME: ${{ github.workspace }}/scratch/jdk21
     steps:
       - uses: actions/checkout@v4
 
@@ -43,6 +45,7 @@ jobs:
           echo "downloading $URL"
           curl -fsSL -o /tmp/ghidra.zip "$URL"
           unzip -q /tmp/ghidra.zip -d /tmp/ghidra-extract
+          mkdir -p "$(dirname "$GHIDRA_INSTALL_DIR")"
           mv /tmp/ghidra-extract/ghidra_* "$GHIDRA_INSTALL_DIR"
           ls "$GHIDRA_INSTALL_DIR/support/sleigh"
 

@@ -12,6 +12,9 @@
   12.1.3, and uploads one zip per version.
 
 ### Fixed
+* The CI artifact no longer contains the Ghidra release, JDK and scratch
+  directories that the workflow unpacked into the workspace. It was about
+  920 MB; the extension itself is about 1 MB.
 * A 32-bit `BNOP` in a header-based (compact) fetch packet scaled its
   displacement by four instead of two, sending its CFG edge into the middle
   of an instruction.
